@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """PPC Toolroom Planning — Flask + SQLite backend"""
-Show less
+
 import sqlite3
 import os
 from flask import Flask, jsonify, request, send_from_directory, g
+
 app = Flask(__name__, static_folder=None)
+
 _server_dir = os.path.dirname(os.path.abspath(__file__))
 _root_dir   = os.path.dirname(_server_dir)
 DB_PATH     = os.path.join(_server_dir, 'ppc.db')
+
 # Find client dir — check several possible locations
 def _find_client_dir():
     candidates = [
@@ -19,8 +22,11 @@ def _find_client_dir():
         if os.path.isfile(os.path.join(d, 'index.html')):
             return d
     return _root_dir  # fallback
+
 CLIENT_DIR = _find_client_dir()
+
 # ── Database helpers ────────────────────────────────────────────────────────
+
 def get_db():
     db = getattr(g, '_database', None)
     if db is None:
@@ -29,11 +35,13 @@ def get_db():
         db.execute("PRAGMA journal_mode=WAL")
         db.execute("PRAGMA foreign_keys=ON")
     return db
+
 @app.teardown_appcontext
 def close_db(exc=None):
     db = getattr(g, '_database', None)
     if db is not None:
         db.close()
+
 def init_db():
     with sqlite3.connect(DB_PATH) as db:
         db.execute("PRAGMA foreign_keys=ON")
@@ -44,6 +52,7 @@ def init_db():
                 customer  TEXT NOT NULL,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             );
+
             CREATE TABLE IF NOT EXISTS parts (
                 id               INTEGER PRIMARY KEY AUTOINCREMENT,
                 order_id         INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
@@ -53,6 +62,7 @@ def init_db():
                 qty              INTEGER DEFAULT 1,
                 created_at       DATETIME DEFAULT CURRENT_TIMESTAMP
             );
+
             CREATE TABLE IF NOT EXISTS process_tracking (
                 id           INTEGER PRIMARY KEY AUTOINCREMENT,
                 part_id      INTEGER NOT NULL REFERENCES parts(id) ON DELETE CASCADE,
@@ -64,11 +74,13 @@ def init_db():
                 UNIQUE(part_id, process_name)
             );
         """)
+
         # Migration: add parent_id column if it doesn't exist yet
         cols = [r[1] for r in db.execute("PRAGMA table_info(parts)").fetchall()]
         if 'parent_id' not in cols:
             db.execute("ALTER TABLE parts ADD COLUMN parent_id INTEGER REFERENCES parts(id) ON DELETE CASCADE")
             db.commit()
+
         # Seed demo data if empty
         count = db.execute("SELECT COUNT(*) FROM orders").fetchone()[0]
         if count == 0:
@@ -76,6 +88,7 @@ def init_db():
             oc202 = cur.lastrowid
             cur = db.execute("INSERT INTO orders (oc_no, customer) VALUES ('184', 'FRIGOGLASS')")
             oc184 = cur.lastrowid
+
             spirotech_parts = [
                 ('B STATION EXTRUSION TOOL UP FORMING', 1),
                 ('BIG NUT', 1), ('SMALL NUT', 1),
@@ -98,6 +111,7 @@ def init_db():
                 db.execute(
                     "INSERT INTO process_tracking (part_id, process_name, required, planned_date) VALUES (?,?,?,?)",
                     (pid, 'FINAL INSPECTION', 1, '2026-04-11'))
+
             frigoglass_parts = [
                 ('B STATION PUNCH SHAPE', 28),
                 ('B STATION PIN', 28),
@@ -115,7 +129,10 @@ def init_db():
                     "INSERT INTO process_tracking (part_id, process_name, required, planned_date) VALUES (?,?,?,?)",
                     (pid, 'FINAL INSPECTION', 1, '2026-04-03'))
             db.commit()
+
+
 # ── Orders API ───────────────────────────────────────────────────────────────
+
 def build_part_tree(parts_flat):
     """Convert a flat list of part dicts (with parent_id) into a nested tree."""
     by_id = {p['id']: {**p, 'children': []} for p in parts_flat}
@@ -128,6 +145,7 @@ def build_part_tree(parts_flat):
             if parent:
                 parent['children'].append(by_id[p['id']])
     return roots
+
 @app.route('/api/orders', methods=['GET'])
 def get_orders():
     db = get_db()
@@ -146,6 +164,7 @@ def get_orders():
             parts_flat.append({**dict(p), 'processes': [dict(pr) for pr in procs]})
         result.append({**dict(o), 'parts': build_part_tree(parts_flat)})
     return jsonify(result)
+
 @app.route('/api/orders', methods=['POST'])
 def create_order():
     data = request.json
@@ -157,6 +176,7 @@ def create_order():
         (data['oc_no'], data['customer']))
     db.commit()
     return jsonify({'id': cur.lastrowid, **data}), 201
+
 @app.route('/api/orders/<int:oid>', methods=['PUT'])
 def update_order(oid):
     data = request.json
@@ -165,13 +185,17 @@ def update_order(oid):
                (data['oc_no'], data['customer'], oid))
     db.commit()
     return jsonify({'success': True})
+
 @app.route('/api/orders/<int:oid>', methods=['DELETE'])
 def delete_order(oid):
     db = get_db()
     db.execute("DELETE FROM orders WHERE id=?", (oid,))
     db.commit()
     return jsonify({'success': True})
+
+
 # ── Parts API ─────────────────────────────────────────────────────────────────
+
 @app.route('/api/parts', methods=['POST'])
 def create_part():
     data = request.json
@@ -189,6 +213,7 @@ def create_part():
         's_no': max_sno + 1, 'part_description': data['part_description'],
         'qty': data.get('qty', 1), 'processes': [], 'children': []
     }), 201
+
 @app.route('/api/parts/<int:pid>', methods=['PUT'])
 def update_part(pid):
     data = request.json
@@ -197,12 +222,14 @@ def update_part(pid):
                (data['part_description'], data['qty'], pid))
     db.commit()
     return jsonify({'success': True})
+
 @app.route('/api/parts/<int:pid>', methods=['DELETE'])
 def delete_part(pid):
     db = get_db()
     db.execute("DELETE FROM parts WHERE id=?", (pid,))
     db.commit()
     return jsonify({'success': True})
+
 @app.route('/api/parts/<int:pid>/process', methods=['PUT'])
 def upsert_process(pid):
     data = request.json
@@ -225,6 +252,7 @@ def upsert_process(pid):
           data.get('actual_date') or None))
     db.commit()
     return jsonify({'success': True})
+
 @app.route('/api/parts/dashboard/upcoming', methods=['GET'])
 def dashboard_upcoming():
     db = get_db()
@@ -241,9 +269,13 @@ def dashboard_upcoming():
         ORDER BY pt.planned_date ASC
     """).fetchall()
     return jsonify([dict(r) for r in rows])
+
+
 # ── Init DB on startup (works with both gunicorn and direct python) ──────────
 init_db()
+
 # ── Serve frontend ───────────────────────────────────────────────────────────
+
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
 def serve_frontend(path):
@@ -251,6 +283,8 @@ def serve_frontend(path):
     if path and os.path.isfile(file_path):
         return send_from_directory(CLIENT_DIR, path)
     return send_from_directory(CLIENT_DIR, 'index.html')
+
+
 if __name__ == '__main__':
     init_db()
     import socket
