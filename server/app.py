@@ -7,8 +7,11 @@ from flask import Flask, jsonify, request, send_from_directory, g
 
 app = Flask(__name__, static_folder=None)
 
-DB_PATH = os.path.join(os.path.dirname(__file__), 'ppc.db')
-CLIENT_DIR = os.path.join(os.path.dirname(__file__), '..', 'client')
+_server_dir = os.path.dirname(os.path.abspath(__file__))
+_root_dir   = os.path.dirname(_server_dir)
+DB_PATH     = os.path.join(_server_dir, 'ppc.db')
+# Support both layouts: client/index.html OR index.html at repo root
+CLIENT_DIR  = os.path.join(_root_dir, 'client') if os.path.isdir(os.path.join(_root_dir, 'client')) else _root_dir
 
 # ── Database helpers ────────────────────────────────────────────────────────
 
@@ -255,6 +258,9 @@ def dashboard_upcoming():
     """).fetchall()
     return jsonify([dict(r) for r in rows])
 
+
+# ── Init DB on startup (works with both gunicorn and direct python) ──────────
+init_db()
 
 # ── Serve frontend ───────────────────────────────────────────────────────────
 
